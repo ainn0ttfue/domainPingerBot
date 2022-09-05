@@ -1,4 +1,6 @@
 import time
+from datetime import datetime
+
 import requests
 import _thread as thread
 import telebot
@@ -27,7 +29,7 @@ REMOVE_DOMAIN_BTN = 'Удалить домен'
 CANCEL_ADD_BTN = 'Отменить добавление'
 CANCEL_RM_BTN = 'Отменить удаление'
 
-DEFAULT_ANSWER = 'Отменить удаление'
+DEFAULT_ANSWER = 'OK'
 
 default_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
 add_domain = types.KeyboardButton(ADD_DOMAIN_BTN)
@@ -40,23 +42,32 @@ cancel_add_btn = types.KeyboardButton(CANCEL_ADD_BTN)
 cancel_add_markup.add(cancel_add_btn)
 
 
+# todo: show error code
 def requests_demon():
     """Демон, который опрашивает домены на доступность"""
     while True:
         items = execute_sql('SELECT * from domains').fetchall()
 
         for item in items:
+            print(item)
+
             domain = item[1]
             user_id = item[2]
-            url = HTTP + str(domain)
+            was_alive = item[3]
+            last_change = datetime.utcfromtimestamp(item[4]).strftime('%Y-%m-%d %H:%M')
 
-            try:
-                response_code = requests.get(url).status_code
-                if response_code >= 400:
-                    raise Exception
+            is_alive = is_domain_fine(domain)
 
-            except Exception as e:
-                bot.send_message(user_id, f'Сайт {url} не доступен.')
+            if not is_alive and was_alive:
+                bot.send_message(user_id, f'ВНИМАНИЕ! Сайт {domain} стал недоступен.')
+                execute_sql(f'UPDATE domains SET (is_alive, last_change) = (0, {int(time.time())}) '
+                            f'WHERE user_id = {user_id} AND domain = "{domain}"')
+            elif not is_alive and not was_alive:
+                bot.send_message(user_id, f'Сайт {domain} по прежнему не доступен (с {last_change}).')
+            elif is_alive and not was_alive:
+                bot.send_message(user_id, f'Сайт {domain} стал доступен.')
+                execute_sql(f'UPDATE domains SET (is_alive, last_change) = (1, {int(time.time())}) '
+                            f'WHERE user_id = {user_id} AND domain = "{domain}"')
 
         time.sleep(REQUEST_FREQUENCY * 60)
 
@@ -69,8 +80,21 @@ def execute_sql(command):
     return res
 
 
+def is_domain_fine(domain):
+    url = HTTP + str(domain)
+
+    try:
+        response_code = requests.get(url).status_code
+        if response_code >= 400:
+            raise Exception
+    except Exception:
+        return False
+
+    return True
+
+
 execute_sql('CREATE TABLE IF NOT EXISTS domains (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT, '
-            'user_id INTEGER UNIQUE, is_alive BOOLEAN, last_change INTERGER);')
+            'user_id INTEGER, is_alive BOOLEAN, last_change INTERGER);')
 PINGER_THREAD_ID = thread.start_new_thread(requests_demon, ())
 
 
@@ -80,6 +104,7 @@ def start(message):
 
 
 # todo: you don't have domains yet
+# todo: show status for each domain
 @bot.message_handler(chat_types=["private"], func=lambda msg: msg.text == SHOW_DOMAINS_BTN)
 def sh_all(message):
     """Вывод всех доменов ПОЛЬЗОВАТЕЛЯ"""
@@ -106,16 +131,24 @@ def get_add_d(message):
         bot.send_message(message.chat.id, DEFAULT_ANSWER, reply_markup=default_markup)
         return
 
+    domain = message.text
+
     try:
-        domain_obj = whois(message.text)
+        domain_obj = whois(domain)
 
         if not domain_obj.get('domain_name'):
             raise Exception
 
-        execute_sql(f'INSERT INTO domains (domain, user_id) VALUES ("{message.text}", {message.from_user.id})')
-        bot.send_message(message.chat.id, f'*** Домен {message.text} был успешно добавлен ***',
+        domain_status = 1
+        if not is_domain_fine(domain):
+            domain_status = 0
+
+        execute_sql(f'INSERT INTO domains (domain, user_id, is_alive, last_change) VALUES '
+                    f'("{domain}", {message.from_user.id}, {domain_status}, {int(time.time())})')
+
+        bot.send_message(message.chat.id, f'*** Домен {domain} был успешно добавлен ***',
                          reply_markup=default_markup)
-    except Exception:
+    except Exception as e:
         bot.send_message(message.chat.id, f'Ошибка! Указан несуществующий домен', reply_markup=default_markup)
 
 
