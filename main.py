@@ -19,7 +19,7 @@ bot = telebot.TeleBot(BOT_ID)
 
 DB_NAME = 'db.sqlite'
 
-REQUEST_FREQUENCY = 1  # in minutes
+REQUEST_FREQUENCY = 15  # in minutes
 HTTP = 'http://'
 HTTPS = 'http://'
 
@@ -42,30 +42,28 @@ cancel_add_btn = types.KeyboardButton(CANCEL_ADD_BTN)
 cancel_add_markup.add(cancel_add_btn)
 
 
-# todo: show error code
 def requests_demon():
     """Демон, который опрашивает домены на доступность"""
     while True:
         items = execute_sql('SELECT * from domains').fetchall()
 
         for item in items:
-            print(item)
-
             domain = item[1]
             user_id = item[2]
             was_alive = item[3]
-            last_change = datetime.utcfromtimestamp(item[4]).strftime('%Y-%m-%d %H:%M')
+            last_change = datetime.utcfromtimestamp(item[4]).strftime('%H:%M %Y-%m-%d')
 
-            is_alive = is_domain_fine(domain)
+            domain_status = get_domain_status(domain)
+            is_alive = domain_status.get('status')
 
             if not is_alive and was_alive:
-                bot.send_message(user_id, f'ВНИМАНИЕ! Сайт {domain} стал недоступен.')
+                bot.send_message(user_id, f'\u274C ВНИМАНИЕ! Сайт {domain} недоступен. {domain_status.get("desc")}')
                 execute_sql(f'UPDATE domains SET (is_alive, last_change) = (0, {int(time.time())}) '
                             f'WHERE user_id = {user_id} AND domain = "{domain}"')
             elif not is_alive and not was_alive:
-                bot.send_message(user_id, f'Сайт {domain} по прежнему не доступен (с {last_change}).')
+                bot.send_message(user_id, f'\u274C Сайт {domain} не доступен (с {last_change}). {domain_status.get("desc")}')
             elif is_alive and not was_alive:
-                bot.send_message(user_id, f'Сайт {domain} стал доступен.')
+                bot.send_message(user_id, f'\u2705 Сайт {domain} стал доступен.')
                 execute_sql(f'UPDATE domains SET (is_alive, last_change) = (1, {int(time.time())}) '
                             f'WHERE user_id = {user_id} AND domain = "{domain}"')
 
@@ -80,17 +78,17 @@ def execute_sql(command):
     return res
 
 
-def is_domain_fine(domain):
+def get_domain_status(domain):
     url = HTTP + str(domain)
 
     try:
         response_code = requests.get(url).status_code
         if response_code >= 400:
-            raise Exception
+            return {'status': False, 'desc': f'Error: {response_code}'}
     except Exception:
-        return False
+        return {'status': False, 'desc': 'Error: Unknown'}
 
-    return True
+    return {'status': True}
 
 
 execute_sql('CREATE TABLE IF NOT EXISTS domains (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT, '
@@ -103,19 +101,24 @@ def start(message):
     bot.send_message(message.chat.id, f'Привет, {message.from_user.first_name}', reply_markup=default_markup)
 
 
-# todo: you don't have domains yet
-# todo: show status for each domain
 @bot.message_handler(chat_types=["private"], func=lambda msg: msg.text == SHOW_DOMAINS_BTN)
 def sh_all(message):
     """Вывод всех доменов ПОЛЬЗОВАТЕЛЯ"""
-    domain_str = 'Ваши домены:\n'
+    domains = execute_sql(f'SELECT * from domains WHERE user_id = {message.from_user.id}').fetchall()
 
-    domains = execute_sql(f'SELECT (domain) from domains WHERE user_id = {message.from_user.id}').fetchall()
+    if not domains:
+        bot.send_message(message.chat.id, 'Вы еще не добавили ни одного домена')
+        return
 
-    for domain in domains:
-        domain_str += f'- {domain[0]} \n'
+    msg = 'Ваши домены:\n'
 
-    bot.send_message(message.chat.id, domain_str)
+    for item in domains:
+        domain = item[1]
+        status = '\u2705' if item[3] else '\u274C'
+
+        msg += f'{status} {domain}\n'
+
+    bot.send_message(message.chat.id, msg)
 
 
 @bot.message_handler(chat_types=["private"], func=lambda msg: msg.text == ADD_DOMAIN_BTN)
@@ -140,7 +143,7 @@ def get_add_d(message):
             raise Exception
 
         domain_status = 1
-        if not is_domain_fine(domain):
+        if not get_domain_status(domain).get('status'):
             domain_status = 0
 
         execute_sql(f'INSERT INTO domains (domain, user_id, is_alive, last_change) VALUES '
