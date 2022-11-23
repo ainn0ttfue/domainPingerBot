@@ -17,7 +17,7 @@ if not BOT_ID:
 
 bot = telebot.TeleBot(BOT_ID)
 
-DB_NAME = 'db.sqlite'
+DB_NAME = '/domains/db.sqlite'
 
 REQUEST_FREQUENCY = 15  # in minutes
 HTTP = 'http://'
