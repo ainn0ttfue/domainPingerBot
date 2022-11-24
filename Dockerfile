@@ -1,6 +1,6 @@
 FROM python:3.8
 
-COPY requrements.txt .
+COPY requerements.txt .
 COPY .env .
 RUN  pip3 install -r requerements.txt
 
