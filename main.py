@@ -20,6 +20,7 @@ bot = telebot.TeleBot(BOT_ID)
 DB_NAME = '/domains/db.sqlite'
 
 REQUEST_FREQUENCY = 60  # in seconds
+SSL_WARNING_EXPIRE_DAYS = 10
 HTTP = 'http://'
 HTTPS = 'http://'
 
@@ -77,7 +78,7 @@ def ssl_requests_demon():
     """Демон, который опрашивает ssl"""
     while True:
         items = execute_sql('SELECT * from domains').fetchall()
-
+        almost_expire = {}
         users_info_dict = {}
         ssl_info_str = "Состояние SSL сертификатов: \n"
 
@@ -93,14 +94,26 @@ def ssl_requests_demon():
                 if not str(user_id) in users_info_dict:
                     users_info_dict[str(user_id)] = ssl_info_str
 
-                users_info_dict[
-                    str(user_id)] += f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%Y-%m-%d')}) \n"
+                if diff.days <= SSL_WARNING_EXPIRE_DAYS:
+                    if not str(user_id) in almost_expire:
+                        almost_expire[str(user_id)] = [domain]
+                    else:
+                        almost_expire[str(user_id)].append(domain)
+
+                users_info_dict[str(user_id)] += \
+                    f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%Y-%m-%d')}) \n"
 
             except Exception as e:
+                users_info_dict[str(user_id)] += f"SSL домена {domain} истекает через *** НЕТ ДАННЫХ *** \n"
                 print(e)
 
         for usr_id, msg in users_info_dict.items():
             bot.send_message(int(usr_id), msg)
+
+        if len(almost_expire):
+            for usr_id, domains in almost_expire.items():
+                bot.send_message(int(usr_id), f'ВНИМАНИЕ! SSL следующих доменов истекают менее чем через'
+                                              f'{SSL_WARNING_EXPIRE_DAYS} дней: \n{"- ".join(domains)}')
 
         time.sleep(REQUEST_FREQUENCY * 60 * 24 * 10)  # every 10 day
 
@@ -220,9 +233,10 @@ def rm_d(message):
             expire = ssl_expiry_datetime(domain)
             diff = expire - now
 
-            temp_str += f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%Y-%m-%d')}) \n"
+            temp_str += f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%d.%m.%Y')}) \n"
 
         except Exception as e:
+            temp_str += f"SSL домена {domain} истекает через *** НЕТ ДАННЫХ *** \n"
             print(e)
 
     bot.send_message(message.chat.id, temp_str)
