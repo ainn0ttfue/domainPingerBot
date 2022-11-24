@@ -23,3 +23,12 @@ Telegram бот для проверки доступности сайтов.
 4. Создайте и запустите docker контейнер из этого изображения:
 
 > docker run -d --restart always -v domains_dir:/domains domain_pinger:latest
+
+## Возможные проблемы
+
+### Ошибка БД 
+> sqlite3.OperationalError: unable to open database file
+
+Если вы сталкнулись с данной ошибкой, вероятнее всего вы запустили скрипт не в docker контейнере, а напрямую.
+Чтобы запустить файл напрямую, создайте папку "domains" в корне системы (для Linux), или запишите
+в константу DB_NAME (файл main.py) значение "db.sqlite".

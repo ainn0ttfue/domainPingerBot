@@ -1,6 +1,6 @@
 import time
 from datetime import datetime
-
+from ssl_info import ssl_expiry_datetime
 import requests
 import _thread as thread
 import telebot
@@ -12,14 +12,14 @@ from decouple import config
 BOT_ID = config('botID', default='')
 
 if not BOT_ID:
-    print('Не указан ID бота! Завершение программы')
+    print('Не указан ID бота! Завершение программы...')
     exit()
 
 bot = telebot.TeleBot(BOT_ID)
 
 DB_NAME = '/domains/db.sqlite'
 
-REQUEST_FREQUENCY = 15  # in minutes
+REQUEST_FREQUENCY = 60  # in seconds
 HTTP = 'http://'
 HTTPS = 'http://'
 
@@ -28,14 +28,16 @@ ADD_DOMAIN_BTN = 'Добавить домен'
 REMOVE_DOMAIN_BTN = 'Удалить домен'
 CANCEL_ADD_BTN = 'Отменить добавление'
 CANCEL_RM_BTN = 'Отменить удаление'
+SHOW_SSL_BTN = 'Показать статус SSL'
 
 DEFAULT_ANSWER = 'OK'
 
-default_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=3)
+default_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
 add_domain = types.KeyboardButton(ADD_DOMAIN_BTN)
 rm_domain = types.KeyboardButton(REMOVE_DOMAIN_BTN)
 my_domains = types.KeyboardButton(SHOW_DOMAINS_BTN)
-default_markup.add(add_domain, rm_domain, my_domains)
+ssl_status = types.KeyboardButton(SHOW_SSL_BTN)
+default_markup.add(add_domain, rm_domain, my_domains, ssl_status)
 
 cancel_add_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
 cancel_add_btn = types.KeyboardButton(CANCEL_ADD_BTN)
@@ -61,13 +63,46 @@ def requests_demon():
                 execute_sql(f'UPDATE domains SET (is_alive, last_change) = (0, {int(time.time())}) '
                             f'WHERE user_id = {user_id} AND domain = "{domain}"')
             elif not is_alive and not was_alive:
-                bot.send_message(user_id, f'\u274C Сайт {domain} не доступен (с {last_change}). {domain_status.get("desc")}')
+                bot.send_message(user_id,
+                                 f'\u274C Сайт {domain} не доступен (с {last_change}). {domain_status.get("desc")}')
             elif is_alive and not was_alive:
                 bot.send_message(user_id, f'\u2705 Сайт {domain} стал доступен.')
                 execute_sql(f'UPDATE domains SET (is_alive, last_change) = (1, {int(time.time())}) '
                             f'WHERE user_id = {user_id} AND domain = "{domain}"')
 
-        time.sleep(REQUEST_FREQUENCY * 60)
+        time.sleep(REQUEST_FREQUENCY * 15)
+
+
+def ssl_requests_demon():
+    """Демон, который опрашивает ssl"""
+    while True:
+        items = execute_sql('SELECT * from domains').fetchall()
+
+        users_info_dict = {}
+        ssl_info_str = "Состояние SSL сертификатов: \n"
+
+        for item in items:
+            domain = item[1]
+            user_id = item[2]
+            now = datetime.now()
+
+            try:
+                expire = ssl_expiry_datetime(domain)
+                diff = expire - now
+
+                if not str(user_id) in users_info_dict:
+                    users_info_dict[str(user_id)] = ssl_info_str
+
+                users_info_dict[
+                    str(user_id)] += f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%Y-%m-%d')}) \n"
+
+            except Exception as e:
+                print(e)
+
+        for usr_id, msg in users_info_dict.items():
+            bot.send_message(int(usr_id), msg)
+
+        time.sleep(REQUEST_FREQUENCY * 60 * 24 * 10)  # every 10 day
 
 
 def execute_sql(command):
@@ -94,6 +129,7 @@ def get_domain_status(domain):
 execute_sql('CREATE TABLE IF NOT EXISTS domains (id INTEGER PRIMARY KEY AUTOINCREMENT, domain TEXT, '
             'user_id INTEGER, is_alive BOOLEAN, last_change INTERGER);')
 PINGER_THREAD_ID = thread.start_new_thread(requests_demon, ())
+SSL_TEST_THREAD_ID = thread.start_new_thread(ssl_requests_demon, ())
 
 
 @bot.message_handler(commands=['start'])
@@ -168,6 +204,28 @@ def rm_d(message):
 
     bot.send_message(message.chat.id, 'Выберите домен для удаления:', reply_markup=markup)
     bot.register_next_step_handler(message, get_rm_d)
+
+
+@bot.message_handler(chat_types=["private"], func=lambda msg: msg.text == SHOW_SSL_BTN)
+def rm_d(message):
+    """Показать статус SSL доменов"""
+    domains = execute_sql(f'SELECT (domain) from domains WHERE user_id = {message.from_user.id}').fetchall()
+    temp_str = 'Состояние SSL сертификатов \n'
+
+    for domain in domains:
+        now = datetime.now()
+        domain = str(domain[0])
+
+        try:
+            expire = ssl_expiry_datetime(domain)
+            diff = expire - now
+
+            temp_str += f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%Y-%m-%d')}) \n"
+
+        except Exception as e:
+            print(e)
+
+    bot.send_message(message.chat.id, temp_str)
 
 
 def get_rm_d(message):
