@@ -18,11 +18,17 @@ if not BOT_ID:
 bot = telebot.TeleBot(BOT_ID)
 
 DB_NAME = '/domains/db.sqlite'
+# DB_NAME = 'db.sqlite'
 
 REQUEST_FREQUENCY = 60  # in seconds
 SSL_WARNING_EXPIRE_DAYS = 10
+SSL_ALERT_EXPIRE_DAYS = 5
 HTTP = 'http://'
 HTTPS = 'http://'
+
+OK_EMOJI = '\u2705'
+ERROR_EMOJI = '\u274C'
+WARNING_EMOJI = '\u26A0'
 
 SHOW_DOMAINS_BTN = 'Показать мои домены'
 ADD_DOMAIN_BTN = 'Добавить домен'
@@ -60,14 +66,15 @@ def requests_demon():
             is_alive = domain_status.get('status')
 
             if not is_alive and was_alive:
-                bot.send_message(user_id, f'\u274C ВНИМАНИЕ! Сайт {domain} недоступен. {domain_status.get("desc")}')
+                bot.send_message(user_id,
+                                 f'{ERROR_EMOJI} ВНИМАНИЕ! Сайт {domain} недоступен. {domain_status.get("desc")}')
                 execute_sql(f'UPDATE domains SET (is_alive, last_change) = (0, {int(time.time())}) '
                             f'WHERE user_id = {user_id} AND domain = "{domain}"')
             elif not is_alive and not was_alive:
                 bot.send_message(user_id,
-                                 f'\u274C Сайт {domain} не доступен (с {last_change}). {domain_status.get("desc")}')
+                                 f'{ERROR_EMOJI}Сайт {domain} не доступен (с {last_change}). {domain_status.get("desc")}')
             elif is_alive and not was_alive:
-                bot.send_message(user_id, f'\u2705 Сайт {domain} стал доступен.')
+                bot.send_message(user_id, f'{OK_EMOJI} Сайт {domain} стал доступен.')
                 execute_sql(f'UPDATE domains SET (is_alive, last_change) = (1, {int(time.time())}) '
                             f'WHERE user_id = {user_id} AND domain = "{domain}"')
 
@@ -80,12 +87,13 @@ def ssl_requests_demon():
         items = execute_sql('SELECT * from domains').fetchall()
         almost_expire = {}
         users_info_dict = {}
-        ssl_info_str = "Состояние SSL сертификатов: \n"
+        ssl_info_str = "SSL сертификаты ваших доменов истекают через: \n"
 
         for item in items:
             domain = item[1]
             user_id = item[2]
             now = datetime.now()
+            temp_emoji_str = OK_EMOJI
 
             try:
                 expire = ssl_expiry_datetime(domain)
@@ -100,11 +108,17 @@ def ssl_requests_demon():
                     else:
                         almost_expire[str(user_id)].append(domain)
 
+                if diff.days <= SSL_WARNING_EXPIRE_DAYS:
+                    temp_emoji_str = WARNING_EMOJI
+
+                    if diff.days <= SSL_ALERT_EXPIRE_DAYS:
+                        temp_emoji_str = ERROR_EMOJI
+
                 users_info_dict[str(user_id)] += \
-                    f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%Y-%m-%d')}) \n"
+                    f"{temp_emoji_str} {diff.days} дня - {domain} ({expire.strftime('%Y-%m-%d')}) \n"
 
             except Exception as e:
-                users_info_dict[str(user_id)] += f"SSL домена {domain} истекает через *** НЕТ ДАННЫХ *** \n"
+                users_info_dict[str(user_id)] += f"{ERROR_EMOJI} *** НЕТ ДАННЫХ *** - {domain}\n"
                 print(e)
 
         for usr_id, msg in users_info_dict.items():
@@ -163,7 +177,7 @@ def sh_all(message):
 
     for item in domains:
         domain = item[1]
-        status = '\u2705' if item[3] else '\u274C'
+        status = OK_EMOJI if item[3] else ERROR_EMOJI
 
         msg += f'{status} {domain}\n'
 
@@ -223,20 +237,27 @@ def rm_d(message):
 def rm_d(message):
     """Показать статус SSL доменов"""
     domains = execute_sql(f'SELECT (domain) from domains WHERE user_id = {message.from_user.id}').fetchall()
-    temp_str = 'Состояние SSL сертификатов \n'
+    temp_str = 'SSL сертификаты ваших доменов истекают через: \n'
 
     for domain in domains:
         now = datetime.now()
         domain = str(domain[0])
+        temp_emoji_str = OK_EMOJI
 
         try:
             expire = ssl_expiry_datetime(domain)
             diff = expire - now
 
-            temp_str += f"SSL домена {domain} истекает через {diff.days} дней ({expire.strftime('%d.%m.%Y')}) \n"
+            if diff.days <= SSL_WARNING_EXPIRE_DAYS:
+                temp_emoji_str = WARNING_EMOJI
+
+                if diff.days <= SSL_ALERT_EXPIRE_DAYS:
+                    temp_emoji_str = ERROR_EMOJI
+
+            temp_str += f"{temp_emoji_str} {diff.days} дня - {domain} ({expire.strftime('%Y-%m-%d')}) \n"
 
         except Exception as e:
-            temp_str += f"SSL домена {domain} истекает через *** НЕТ ДАННЫХ *** \n"
+            temp_str += f"{ERROR_EMOJI} *** НЕТ ДАННЫХ *** - {domain}\n"
             print(e)
 
     bot.send_message(message.chat.id, temp_str)
