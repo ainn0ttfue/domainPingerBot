@@ -2,6 +2,7 @@ FROM python:3.8
 
 COPY requerements.txt .
 COPY .env .
+COPY src/ /src/
 RUN  pip3 install -r requerements.txt
 
 
