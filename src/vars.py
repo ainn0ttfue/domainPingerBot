@@ -35,12 +35,13 @@ DOMAIN_ALERT_REGISTRATION_DAYS = 10
 
 # markup
 default_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-add_domain = types.KeyboardButton(ADD_DOMAIN_BTN)
-rm_domain = types.KeyboardButton(REMOVE_DOMAIN_BTN)
+# add_domain = types.KeyboardButton(ADD_DOMAIN_BTN)
+# rm_domain = types.KeyboardButton(REMOVE_DOMAIN_BTN)
 my_domains = types.KeyboardButton(SHOW_DOMAINS_BTN)
 ssl_status = types.KeyboardButton(SHOW_SSL_BTN)
 registration_status = types.KeyboardButton(SHOW_REGISTRATION_BTN)
-default_markup.add(add_domain, rm_domain, my_domains, ssl_status, registration_status)
+# default_markup.add(add_domain, rm_domain, my_domains, ssl_status, registration_status)
+default_markup.add(my_domains, ssl_status, registration_status)
 
 cancel_add_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=1)
 cancel_add_btn = types.KeyboardButton(CANCEL_ADD_BTN)
